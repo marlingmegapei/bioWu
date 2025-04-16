@@ -1,27 +1,26 @@
 /***************************************************************
- * TERRA DIVINATION - Code unique, version PIONS + BAGUA
- * p5.js version
- *
- * SOMMAIRE :
- *  - Chapitre 1 : Constants & Globals
- *  - Chapitre 2 : Clusters & effect matrices (3 clusters : exploration, stigmergy, resourceMgmt)
- *  - Chapitre 3 : Simulation classes & logic (Agent, Resource, PheromoneSegment)
- *  - Chapitre 4 : Interface (Bagua 3×3, Pions drag-and-drop, mouse interaction)
- *  - Chapitre 5 : Setup() & Draw() (main p5 loop)
+ * TERRA DIVINATION - CODE COMPLET
+ * 
+ * CHAPITRES :
+ *  1. CONSTANTS & GLOBALS
+ *  2. CLUSTERS & MATRICES (4 CLUSTERS)
+ *  3. SIMULATION CLASSES (Agent, Resource, Pheromone)
+ *  4. INTERFACE (Bagua + Pions)
+ *  5. GRAPHIQUES DE SUIVI
+ *  6. SETUP & DRAW
  ***************************************************************/
-
 
 /***************************************************************
- *               CHAPITRE 1 : CONSTANTS & GLOBALS
+ *                1) CONSTANTS & GLOBALS
  ***************************************************************/
 
-// Dimensions générales
 const CONTROL_PANEL_WIDTH = 300;
 const SIM_W = 600;
 const SIM_H = 600;
+const GRAPH_H = 200;               // espace en bas pour les graphes
 const TOTAL_WIDTH = CONTROL_PANEL_WIDTH + SIM_W;
+const TOTAL_HEIGHT = SIM_H + GRAPH_H;
 
-// Variables globales pour la simulation
 let environment = {
   nestPos: null,
   nestRadius: 20
@@ -32,149 +31,184 @@ let resources = [];
 let pheromones = [];
 let totalCollected = 0;
 
-/***************************************************************
- * CHAPITRE 2 : CLUSTERS & EFFECT MATRICES (Version 4-clusters)
- ***************************************************************/
-
-// 4 clusters : exploration, stigmergy, resourceMgmt, vitality
-const clustersInitial = {
-  exploration: {
-    speed: 2,
-    detectionRadius: 30,
-    randomTurnProb: 0.05
-  },
-  stigmergy: {
-    pheromoneLifetime: 300,
-    depositThreshold: 5,
-    pheromoneFollowWeight: 0.7
-  },
-  resourceMgmt: {
-    resourceCount: 20,
-    initialQuantity: 100,
-    consumptionRate: 10
-  },
-  vitality: {
-    lifetime: 2000,         // en ticks/frames
-    reproductionRate: 0.01, // chance de faire naître un nouvel agent
-    fatigueRate: 0.0005     // vitesse d’accumulation de fatigue
-  }
+// Historique pour tracer nos graphes (4 param)
+let history = {
+  speed: [],      // historique de la vitesse
+  antCount: []    // historique du nombre de fourmis
 };
 
-// copie active
+/***************************************************************
+ *            2) CLUSTERS & MATRICES (4 CLUSTERS)
+ ***************************************************************/
+
+// Paramètres initiaux (un seul objet)
+const clustersInitial = {
+  speed: 2,
+  detectionRadius: 30,
+  randomTurnProb: 0.05,
+  pheromoneLifetime: 300,
+  pheromoneFollowWeight: 0.7,
+  consumptionRate: 10,
+  fatigueRate: 0.001,
+  reproductionRate: 0.001,
+  lifetime: 2000
+};
+
+// Copie active
 let clusters = JSON.parse(JSON.stringify(clustersInitial));
 
-// Matrices d’effets
+// Quatre matrices (Exploration, Stigmergy, ResourceMgmt, Vitality)
 const effectMatrix_Exploration = {
-  Qian: { speed: +1,  detectionRadius: +5,  randomTurnProb: -0.01 },
-  Kun:  { speed: -0.5, detectionRadius: +10, randomTurnProb: -0.02 },
-  Zhen: { speed: +1.5, detectionRadius: -5,  randomTurnProb: +0.03 },
-  Xun:  { speed: +0.5, detectionRadius: +2,  randomTurnProb: +0.01 },
-  Kan:  { speed: +0,   detectionRadius: +3,  randomTurnProb: +0.02 },
-  Li:   { speed: +2,   detectionRadius: -2,  randomTurnProb: -0.01 },
-  Gen:  { speed: -1,   detectionRadius: +8,  randomTurnProb: -0.03 },
-  Dui:  { speed: +1,   detectionRadius: +3,  randomTurnProb: +0.01 }
+  Qian: { speed:+1, detectionRadius:+5, fatigueRate:+0.0005 },
+  Kun:  { speed:-0.5, detectionRadius:+10, randomTurnProb:-0.02 },
+  Zhen: { speed:+1.5, randomTurnProb:+0.03, fatigueRate:+0.001 },
+  Xun:  { detectionRadius:+2, randomTurnProb:+0.01 },
+  Kan:  { randomTurnProb:+0.02, fatigueRate:-0.0003 },
+  Li:   { speed:+2, detectionRadius:-2, fatigueRate:+0.001 },
+  Gen:  { speed:-1, detectionRadius:+8, randomTurnProb:-0.03 },
+  Dui:  { speed:+1, detectionRadius:+3, fatigueRate:+0.0002 }
 };
 
 const effectMatrix_Stigmergy = {
-  Qian: { pheromoneLifetime: +50, depositThreshold: -1, pheromoneFollowWeight: +0.1 },
-  Kun:  { pheromoneLifetime: +100, depositThreshold: +2, pheromoneFollowWeight: -0.1 },
-  Zhen: { pheromoneLifetime: -50,  depositThreshold: -2, pheromoneFollowWeight: +0.2 },
-  Xun:  { pheromoneLifetime: +20,  depositThreshold: -1, pheromoneFollowWeight: +0.05 },
-  Kan:  { pheromoneLifetime: +0,   depositThreshold: +0, pheromoneFollowWeight: +0.1 },
-  Li:   { pheromoneLifetime: -30,  depositThreshold: -1, pheromoneFollowWeight: +0.15 },
-  Gen:  { pheromoneLifetime: +80,  depositThreshold: +3, pheromoneFollowWeight: -0.15 },
-  Dui:  { pheromoneLifetime: +30,  depositThreshold: +0, pheromoneFollowWeight: +0.05 }
+  Qian: { pheromoneLifetime:+50, pheromoneFollowWeight:+0.1 },
+  Kun:  { pheromoneLifetime:+100, pheromoneFollowWeight:-0.1, detectionRadius:-5 },
+  Zhen: { pheromoneLifetime:-50, pheromoneFollowWeight:+0.2 },
+  Xun:  { pheromoneLifetime:+20, detectionRadius:+3 },
+  Kan:  { pheromoneFollowWeight:+0.1 },
+  Li:   { pheromoneLifetime:-30, pheromoneFollowWeight:+0.15 },
+  Gen:  { pheromoneLifetime:+80, pheromoneFollowWeight:-0.15, randomTurnProb:-0.02 },
+  Dui:  { pheromoneLifetime:+30, pheromoneFollowWeight:+0.05 }
 };
 
 const effectMatrix_ResourceMgmt = {
-  Qian: { resourceCount: +10, initialQuantity: +20, consumptionRate: +5 },
-  Kun:  { resourceCount: +5,  initialQuantity: +40, consumptionRate: -5 },
-  Zhen: { resourceCount: -5,  initialQuantity: -10, consumptionRate: +10 },
-  Xun:  { resourceCount: +0,  initialQuantity: +10, consumptionRate: +0 },
-  Kan:  { resourceCount: -10, initialQuantity: +0,  consumptionRate: -5 },
-  Li:   { resourceCount: +10, initialQuantity: -20, consumptionRate: +5 },
-  Gen:  { resourceCount: +0,  initialQuantity: +30, consumptionRate: -5 },
-  Dui:  { resourceCount: +5,  initialQuantity: +5,  consumptionRate: +0 }
+  Qian: { consumptionRate:+5 },
+  Kun:  { consumptionRate:-3 },
+  Zhen: { consumptionRate:+10 },
+  Xun:  { consumptionRate:+0 },
+  Kan:  { consumptionRate:-5 },
+  Li:   { consumptionRate:+8 },
+  Gen:  { consumptionRate:-5 },
+  Dui:  { consumptionRate:+2 }
 };
 
-// Nouvelle matrice pour vitality
 const effectMatrix_Vitality = {
-  Qian: { lifetime: +300, reproductionRate: +0.005, fatigueRate: -0.0001 },
-  Kun:  { lifetime: +500, reproductionRate: -0.01,  fatigueRate: +0.0003 },
-  Zhen: { lifetime: -200, reproductionRate: +0.02,  fatigueRate: +0.0005 },
-  Xun:  { lifetime: +0,   reproductionRate: +0.01,  fatigueRate: -0.0002 },
-  Kan:  { lifetime: +100, reproductionRate: +0,     fatigueRate: -0.0003 },
-  Li:   { lifetime: -300, reproductionRate: +0.02,  fatigueRate: +0.0006 },
-  Gen:  { lifetime: +200, reproductionRate: -0.005, fatigueRate: -0.0001 },
-  Dui:  { lifetime: +50,  reproductionRate: +0.005, fatigueRate: +0 }
+  Qian: { lifetime:+300, speed:-0.5 },
+  Kun:  { lifetime:+500, fatigueRate:+0.0005 },
+  Zhen: { lifetime:-200, reproductionRate:+0.01 },
+  Xun:  { fatigueRate:-0.0002 },
+  Kan:  { fatigueRate:-0.0003 },
+  Li:   { lifetime:-300, reproductionRate:+0.005 },
+  Gen:  { lifetime:+200, speed:-0.8 },
+  Dui:  { lifetime:+50, reproductionRate:+0.003 }
 };
 
-/**
- * Appliquer un trigramme à un cluster
- */
+// Application d'un trigramme
 function applyTrigramEffect(trigram, clusterName) {
-  let matrix;
-  if (clusterName === 'exploration') {
-    matrix = effectMatrix_Exploration;
-  } else if (clusterName === 'stigmergy') {
-    matrix = effectMatrix_Stigmergy;
-  } else if (clusterName === 'resourceMgmt') {
-    matrix = effectMatrix_ResourceMgmt;
-  } else if (clusterName === 'vitality') {
-    matrix = effectMatrix_Vitality;
-  } else {
-    console.warn(`Cluster inconnu : ${clusterName}`);
-    return;
-  }
-
-  let effect = matrix[trigram];
+  let matrixes = {
+    exploration: effectMatrix_Exploration,
+    stigmergy: effectMatrix_Stigmergy,
+    resourceMgmt: effectMatrix_ResourceMgmt,
+    vitality: effectMatrix_Vitality
+  };
+  let mat = matrixes[clusterName];
+  if (!mat) return;
+  let effect = mat[trigram];
   if (!effect) return;
-
   for (let key in effect) {
-    if (clusters[clusterName][key] !== undefined) {
-      clusters[clusterName][key] += effect[key];
+    if (clusters[key] !== undefined) {
+      clusters[key] += effect[key];
     }
   }
-  console.log(`[${trigram}] appliqué à ${clusterName} =>`, effect, clusters[clusterName]);
 }
 
-/**
- * resetCluster(clusterName) : remet juste le cluster ciblé à ses valeurs initiales
- */
+// reset : on rétablit toutes les valeurs du cluster
 function resetCluster(clusterName) {
-  clusters[clusterName] = JSON.parse(JSON.stringify(clustersInitial[clusterName]));
-  console.log(`Cluster ${clusterName} réinitialisé =>`, clusters[clusterName]);
+  // Pour simplifier, on reset tout
+  // (si tu veux reset juste un cluster, il faut coder différemment)
+  clusters = JSON.parse(JSON.stringify(clustersInitial));
 }
+function updateClusters() {
+  // 1) on repart des valeurs de base
+  clusters = JSON.parse(JSON.stringify(clustersInitial));
 
+  // 2) pour chaque pion, on ajoute son effet trigram × clickCount
+  const matrixes = {
+    exploration:    effectMatrix_Exploration,
+    stigmergy:      effectMatrix_Stigmergy,
+    resourceMgmt:   effectMatrix_ResourceMgmt,
+    vitality:       effectMatrix_Vitality
+  };
+
+  for (let p of pieces) {
+    if (!p.currentCell || p.clickCount === 0) continue;
+    let trigram = p.currentCell.key;
+    let mat = matrixes[p.clusterName];
+    if (!mat) continue;
+    let effect = mat[trigram];
+    if (!effect) continue;
+
+    for (let param in effect) {
+      if (clusters[param] !== undefined) {
+        clusters[param] += effect[param] * p.clickCount;
+        // pas de valeur négative
+        clusters[param] = max(clusters[param], 0);
+      }
+    }
+  }
+}
 
 
 /***************************************************************
- *    CHAPITRE 3 : SIMULATION CLASSES & LOGIC
+ * 3) SIMULATION CLASSES & LOGIC
  ***************************************************************/
-
-// Classes Agent, Resource, PheromoneSegment
 
 class Agent {
   constructor(pos) {
     this.pos = pos.copy();
     this.dir = p5.Vector.random2D();
     this.state = "foraging";
-    this.lastDepositPos = null;
+    this.age = 0;
+    this.fatigue = 0;
+    this.lastDepositPos = null;  // ← ajouté
+
+    // (tes autres indicateurs éventuels)
+    this.distanceMax = 0;
+    this.turnCount = 0;
+    this.pheromoneFollows = 0;
+    this.resourcesCollected = 0;
   }
+  // … suite de la classe …
+
 
   update() {
+    // Vitalité
+    this.age++;
+    this.fatigue += clusters.fatigueRate;
+    if (this.age > clusters.lifetime || this.fatigue >= 1) {
+      agents.splice(agents.indexOf(this), 1);
+      return;
+    }
+
+    // Comportement
     if (this.state === "foraging") {
       this.foragingBehavior();
     } else {
       this.returningBehavior();
     }
 
-    let spd = clusters.exploration.speed;
-    this.pos.add(p5.Vector.mult(this.dir, spd));
+    // Déplacement
+    let speedFactor = map(this.fatigue, 0, 1, 1, 0.2);
+    let velocity = p5.Vector.mult(this.dir, clusters.speed * speedFactor);
+    this.pos.add(velocity);
 
-    // Gestion bords
+    // Bords
     if (this.pos.x < 0 || this.pos.x > SIM_W) this.dir.x *= -1;
     if (this.pos.y < 0 || this.pos.y > SIM_H) this.dir.y *= -1;
+
+    // Reproduction
+    if (random() < clusters.reproductionRate) {
+      agents.push(new Agent(this.pos.copy()));
+    }
   }
 
   foragingBehavior() {
@@ -182,81 +216,93 @@ class Agent {
     if (target) {
       let desired = p5.Vector.sub(target.pos, this.pos).normalize();
       this.dir = desired;
-      if (p5.Vector.dist(this.pos, target.pos) < clusters.exploration.detectionRadius/2) {
+      if (p5.Vector.dist(this.pos, target.pos) < clusters.detectionRadius/2) {
         this.collectResource(target);
       }
     } else {
       let detected = this.detectPheromone();
       if (detected) {
-        let reverseDir = p5.Vector.mult(detected.direction, -1);
-        this.dir.lerp(reverseDir, clusters.stigmergy.pheromoneFollowWeight);
-        this.dir.normalize();
-      } else {
-        if (random() < clusters.exploration.randomTurnProb) {
-          this.dir = p5.Vector.random2D();
-        }
+        // On incrémente un followCount pour épaissir la ligne
+        detected.followCount++;
+        let rev = p5.Vector.mult(detected.direction, -1);
+        this.dir.lerp(rev, clusters.pheromoneFollowWeight).normalize();
+      } else if (random() < clusters.randomTurnProb) {
+        this.dir = p5.Vector.random2D();
       }
     }
   }
 
-  returningBehavior() {
-    let dirToNest = p5.Vector.sub(environment.nestPos, this.pos).normalize();
-    this.dir = dirToNest;
+ returningBehavior() {
+  // diriger vers le nid
+  let toNest = p5.Vector.sub(environment.nestPos, this.pos).normalize();
+  this.dir = toNest;
 
-    if (this.lastDepositPos &&
-        p5.Vector.dist(this.pos, this.lastDepositPos) > clusters.stigmergy.depositThreshold) {
-      pheromones.push(new PheromoneSegment(
-        this.lastDepositPos.x, this.lastDepositPos.y,
-        this.pos.x, this.pos.y
-      ));
-      this.lastDepositPos = this.pos.copy();
-    }
-
-    if (p5.Vector.dist(this.pos, environment.nestPos) < environment.nestRadius) {
-      this.state = "foraging";
-      this.dir = p5.Vector.random2D();
-    }
+  // si jamais lastDepositPos n'existait pas, on l'initialise
+  if (!this.lastDepositPos) {
+    this.lastDepositPos = this.pos.copy();
   }
 
+  // dépôt continu : on crée à chaque frame un nouveau segment
+  pheromones.push(new PheromoneSegment(
+    this.lastDepositPos.x, this.lastDepositPos.y,
+    this.pos.x, this.pos.y
+  ));
+  // on met à jour le point de départ
+  this.lastDepositPos = this.pos.copy();
+
+  // dès qu'on atteint le nid, on reset l'état et lastDepositPos
+  if (p5.Vector.dist(this.pos, environment.nestPos) < environment.nestRadius) {
+    this.state = "foraging";
+    this.dir = p5.Vector.random2D();
+    this.lastDepositPos = null;  // ← ajouté
+  }
+}
+
+
+ 
+
   show() {
-    noStroke();
+    noStroke();                // ← désactivation du contour
     fill(255);
     ellipse(this.pos.x, this.pos.y, 4, 4);
   }
 
+
   findResource() {
-    for (let r of resources) {
-      if (r.quantity > 0 &&
-          p5.Vector.dist(this.pos, r.pos) < clusters.exploration.detectionRadius) {
-        return r;
-      }
-    }
-    return null;
+    return resources.find(r =>
+      r.quantity > 0 &&
+      p5.Vector.dist(this.pos, r.pos) < clusters.detectionRadius
+    );
   }
+collectResource(r) {
+  // on décrémente la quantité
+  r.quantity -= clusters.consumptionRate;
+  totalCollected += clusters.consumptionRate;
 
-  collectResource(resource) {
-    resource.quantity -= clusters.resourceMgmt.consumptionRate;
-    totalCollected += clusters.resourceMgmt.consumptionRate;
-    this.state = "returning";
-    this.lastDepositPos = this.pos.copy();
+  // on passe en mode « returning » et on prépare le dépôt de phéromones
+  this.state = "returning";
+  this.lastDepositPos = this.pos.copy();
 
-    if (resource.quantity <= 0) {
-      let idx = resources.indexOf(resource);
-      if (idx > -1) {
-        resources.splice(idx, 1);
-      }
+  // si la ressource est épuisée, on la retire du tableau
+  if (r.quantity <= 0) {
+    const idx = resources.indexOf(r);
+    if (idx > -1) {
+      resources.splice(idx, 1);
     }
   }
+}
+
+
 
   detectPheromone() {
+    // On cherche le plus fort segment (max strength) dans le rayon
     let best = null;
-    let bestStrength = 0;
+    let bestVal = -999;
     for (let seg of pheromones) {
-      let d = pointLineDistance(this.pos.x, this.pos.y,
-                                seg.x1, seg.y1, seg.x2, seg.y2);
-      if (d < clusters.exploration.detectionRadius && seg.strength>bestStrength) {
+      let d = pointLineDistance(this.pos.x, this.pos.y, seg.x1, seg.y1, seg.x2, seg.y2);
+      if (d < clusters.detectionRadius && seg.strength > bestVal) {
         best = seg;
-        bestStrength = seg.strength;
+        bestVal = seg.strength;
       }
     }
     return best;
@@ -266,12 +312,12 @@ class Agent {
 class Resource {
   constructor() {
     this.pos = createVector(random(SIM_W), random(SIM_H));
-    this.quantity = clusters.resourceMgmt.initialQuantity;
+    this.quantity = 100;
   }
 
   show() {
     noStroke();
-    let brightness = map(this.quantity, 0, clusters.resourceMgmt.initialQuantity, 50, 255);
+    let brightness = map(this.quantity, 0, 100, 50, 255);
     fill(0, brightness, 0);
     ellipse(this.pos.x, this.pos.y, 16, 16);
   }
@@ -279,14 +325,13 @@ class Resource {
 
 class PheromoneSegment {
   constructor(x1, y1, x2, y2) {
-    this.x1 = x1;
-    this.y1 = y1;
-    this.x2 = x2;
-    this.y2 = y2;
-    this.life = clusters.stigmergy.pheromoneLifetime;
-    this.maxLife = clusters.stigmergy.pheromoneLifetime;
-    this.direction = createVector(x2 - x1, y2 - y1).normalize();
+    this.x1 = x1; this.y1 = y1;
+    this.x2 = x2; this.y2 = y2;
+    this.life = clusters.pheromoneLifetime;
+    this.maxLife = clusters.pheromoneLifetime;
     this.strength = 255;
+    this.direction = createVector(x2 - x1, y2 - y1).normalize();
+    this.followCount = 0; // plus les agents la suivent, plus c'est épais
   }
 
   update() {
@@ -295,17 +340,18 @@ class PheromoneSegment {
   }
 
   show() {
-    stroke(100, 100, 255, this.strength);
-    strokeWeight(2);
+    let thick = 2 + this.followCount * 0.2;
+    stroke(100,100,255, this.strength);
+    strokeWeight(thick);
     line(this.x1, this.y1, this.x2, this.y2);
   }
 
   isFinished() {
-    return (this.life <= 0);
+    return this.life <= 0;
   }
 }
 
-// Fonction utilitaire
+// Distance point->segment (utilitaire)
 function pointLineDistance(px, py, x1, y1, x2, y2) {
   let A = px - x1;
   let B = py - y1;
@@ -313,37 +359,32 @@ function pointLineDistance(px, py, x1, y1, x2, y2) {
   let D = y2 - y1;
   let dot = A*C + B*D;
   let len_sq = C*C + D*D;
-  let param = (len_sq!==0) ? dot/len_sq : -1;
+  let param = (len_sq !== 0) ? dot/len_sq : -1;
 
   let xx, yy;
-  if (param<0) { xx = x1; yy = y1; }
-  else if (param>1) { xx = x2; yy = y2; }
-  else { xx = x1 + param*C; yy = y1 + param*D; }
-
-  let dx = px-xx;
-  let dy = py-yy;
+  if (param<0){xx=x1; yy=y1;}
+  else if(param>1){xx=x2; yy=y2;}
+  else {
+    xx = x1 + param*C;
+    yy = y1 + param*D;
+  }
+  let dx=px-xx, dy=py-yy;
   return sqrt(dx*dx + dy*dy);
 }
 
-
 /***************************************************************
- *   CHAPITRE 4 : INTERFACE (Bagua + Pions + Drag-and-Drop)
+ * 4) INTERFACE (Bagua + Pions)
  ***************************************************************/
 
-// Bagua 3×3 : 8 trigrammes + 1 case centrale
+// Bagua
 let baguaData = [
-  // row0
   [ {key:'Xun', symbol:'☴'}, {key:'Li', symbol:'☲'}, {key:'Kun', symbol:'☷'} ],
-  // row1
   [ {key:'Zhen', symbol:'☳'}, {key:'CENTER', symbol:''}, {key:'Dui', symbol:'☱'} ],
-  // row2
   [ {key:'Gen', symbol:'☶'}, {key:'Kan', symbol:'☵'}, {key:'Qian', symbol:'☰'} ]
 ];
-
 let baguaCells = [];
-let cellSize = 80;  // dimension d’une cellule
+let cellSize = 80;
 
-// Pions : 3 pions = exploration, stigmergy, resourceMgmt
 let pieces = [];
 
 class Piece {
@@ -354,7 +395,8 @@ class Piece {
     this.w = 40; this.h = 40;
     this.isDragging = false;
     this.offX = 0; this.offY = 0;
-    this.currentCell = null;
+    this.currentCell = null;  // la cellule sur laquelle il est posé
+    this.clickCount = 0;      // nombre de clics cumulés sur cette cellule
   }
 
   draw() {
@@ -365,28 +407,33 @@ class Piece {
     fill(255);
     textSize(12);
     textAlign(CENTER, CENTER);
-    text(this.clusterName[0].toUpperCase(), this.x+this.w/2, this.y+this.h/2);
+    text(this.clusterName[0].toUpperCase(), this.x + this.w/2, this.y + this.h/2);
     pop();
   }
 
-  mouseOver(mx,my) {
-    return (mx>=this.x && mx<=this.x+this.w && my>=this.y && my<=this.y+this.h);
+  mouseOver(mx, my) {
+    return (mx > this.x && mx < this.x + this.w && my > this.y && my < this.y + this.h);
+  }
+
+  applyClick(cell) {
+    if (cell.key === 'CENTER') {
+      // reset de ce pion
+      this.currentCell = null;
+      this.clickCount = 0;
+    } else {
+      if (this.currentCell && this.currentCell.key === cell.key) {
+        // recliquer sur la même case => on cumule
+        this.clickCount++;
+      } else {
+        // nouveau placement
+        this.currentCell = cell;
+        this.clickCount = 1;
+      }
+    }
   }
 }
 
-// Applique ou reset si on re-clique
-function applyOrResetIfOnCell(p) {
-  if (!p.currentCell) return;
-  if (p.currentCell.key==='CENTER') {
-    // reset cluster
-    resetCluster(p.clusterName);
-  } else {
-    // applique trigram
-    applyTrigramEffect(p.currentCell.key, p.clusterName);
-  }
-}
 
-// Cherche la cell sous le pion
 function getCellUnderPiece(p) {
   let cx = p.x + p.w/2;
   let cy = p.y + p.h/2;
@@ -398,44 +445,97 @@ function getCellUnderPiece(p) {
   return null;
 }
 
+/***************************************************************
+ * 5) GRAPHIQUES DE SUIVI DES CLUSTERS
+ ***************************************************************/
+
+function updateClusterHistory() {
+  // On ajoute un point chaque 10 frames
+  if (frameCount % 10 !== 0) return;
+
+  // 1) vitesse du cluster exploration
+  history.speed.push(clusters.speed);
+  // 2) nombre actuel d'agents (fourmis)
+  history.antCount.push(agents.length);
+
+  // limiter la longueur historique
+  let maxLen = SIM_W;
+  if (history.speed.length > maxLen)   history.speed.shift();
+  if (history.antCount.length > maxLen) history.antCount.shift();
+}
+
+function drawClusterGraphs() {
+  // deux graphes de hauteur égale
+  let each   = GRAPH_H / 2;
+  let keys   = ['speed', 'antCount'];
+  let labels = ['Speed', 'Ants'];
+
+  for (let i = 0; i < 2; i++) {
+    let startY = SIM_H + i * each;
+
+    // cadre
+    noFill();
+    stroke(150);
+    rect(CONTROL_PANEL_WIDTH, startY, SIM_W, each);
+
+    // récupère l'historique ou un tableau vide
+    let arr = history[keys[i]] || [];
+    // évite max([]) => on prend 1 par défaut
+    let maxVal = arr.length ? max(arr) : 1;
+
+    // tracé de la courbe
+    stroke(255);
+    beginShape();
+    for (let x = 0; x < arr.length; x++) {
+      let val = arr[x];
+      let y = map(val, 0, maxVal, startY + each, startY);
+      vertex(CONTROL_PANEL_WIDTH + x, y);
+    }
+    endShape();
+
+    // label
+    noStroke();
+    fill(200);
+    textSize(14);
+    text(labels[i], CONTROL_PANEL_WIDTH + 5, startY + 20);
+  }
+}
+
 
 /***************************************************************
- *           CHAPITRE 5 : SETUP() & DRAW() (MAIN LOOP)
+ * 6) SETUP & DRAW (MAIN LOOP)
  ***************************************************************/
 
 function setup() {
-  createCanvas(TOTAL_WIDTH, SIM_H);
+  createCanvas(TOTAL_WIDTH, TOTAL_HEIGHT);
 
-  // -- Construction bagua (3x3)
-  let startX = 0;
-  let startY = 100;  // Laisse un peu d’espace en haut
-  for (let row=0; row<3; row++){
-    for (let col=0; col<3; col++){
+  // Bagua cells
+  for (let row=0; row<3; row++) {
+    for (let col=0; col<3; col++) {
       let data = baguaData[row][col];
       baguaCells.push({
         row, col,
-        x: startX + col*cellSize,
-        y: startY + row*cellSize,
-        w: cellSize,
-        h: cellSize,
-        key: data.key,
-        symbol: data.symbol
+        x: col*cellSize,
+        y: 100 + row*cellSize,
+        w: cellSize, h: cellSize,
+        ...data
       });
     }
   }
 
-  // -- Création des 3 pions (exploration, stigmergy, resourceMgmt)
+  // 4 pions
   pieces.push(new Piece('exploration', color(200,50,50), 50, 10));
-  pieces.push(new Piece('stigmergy',   color(50,200,50), 100, 10));
-  pieces.push(new Piece('resourceMgmt',color(50,50,200), 150, 10));
+  pieces.push(new Piece('stigmergy', color(50,200,50), 100, 10));
+  pieces.push(new Piece('resourceMgmt', color(50,50,200), 150, 10));
   pieces.push(new Piece('vitality', color(180,100,200), 200, 10));
 
-  // -- Initialisation de la simulation
   environment.nestPos = createVector(SIM_W/2, SIM_H/2);
+
+  // Agents + ressources
   for (let i=0; i<30; i++){
     agents.push(new Agent(environment.nestPos.copy()));
   }
-  for (let i=0; i<clusters.resourceMgmt.resourceCount; i++){
+  for (let i=0; i<20; i++){
     resources.push(new Resource());
   }
 }
@@ -443,36 +543,35 @@ function setup() {
 function draw() {
   background(51);
 
-  // Panneau gauche
-  push();
-  noStroke();
-  fill(80);
-  rect(0,0, CONTROL_PANEL_WIDTH, SIM_H);
-  drawBagua();
-  drawPieces();
-  pop();
+  // Panel gauche
+  fill(80); noStroke();
+  rect(0, 0, CONTROL_PANEL_WIDTH, SIM_H);
 
-  // Zone simulation à droite
+  drawBagua();
+  pieces.forEach(p=>p.draw());
+
+  // Zone simulation
   push();
   translate(CONTROL_PANEL_WIDTH, 0);
   drawSimulation();
   pop();
 
-  // Debug
-  showDebugText();
+  // Mise à jour
+  updateClusterHistory();
+
+  // Graphes
+  drawClusterGraphs();
 }
 
-/** Dessin du bagua (grille) */
 function drawBagua() {
-  stroke(220);
-  strokeWeight(2);
   for (let c of baguaCells) {
-    fill(c.key==='CENTER'? 140 : 100);
+    stroke(220);
+    fill(c.key==='CENTER'?140:100);
     rect(c.x, c.y, c.w, c.h);
     fill(255);
-    if (c.symbol!=='') {
+    textAlign(CENTER,CENTER);
+    if (c.symbol) {
       textSize(30);
-      textAlign(CENTER, CENTER);
       text(c.symbol, c.x+c.w/2, c.y+c.h/2);
     } else if (c.key==='CENTER') {
       textSize(14);
@@ -480,116 +579,70 @@ function drawBagua() {
     }
   }
 }
-
-/** Dessin des pions */
-function drawPieces() {
-  for (let p of pieces){
-    p.draw();
-  }
-}
-
-/** Simulation */
 function drawSimulation() {
-  noStroke();
-  fill(51);
-  rect(0,0, SIM_W, SIM_H);
+  noStroke();  // ← ajouté en tout début pour désactiver le contour
 
-  // Dessin du nid
   drawNest();
 
-  // Ressources
-  for (let r of resources) {
-    r.show();
-  }
+  resources.forEach(r => r.show());
 
-  // Pheromones
-  for (let i=pheromones.length-1; i>=0; i--){
-    pheromones[i].update();
-    pheromones[i].show();
-    if (pheromones[i].isFinished()) {
-      pheromones.splice(i,1);
-    }
-  }
+  pheromones.forEach(p => {
+    p.update();
+    p.show();
+  });
+  pheromones = pheromones.filter(p => !p.isFinished());
 
-  // Agents
-  for (let a of agents){
+  agents.forEach(a => {
     a.update();
     a.show();
-  }
+  });
 
-  // Infos
-  fill(255);
-  textSize(16);
-  text(`Ressources restantes : ${resources.length}`, 10, SIM_H - 20);
-  text(`Total collecté : ${totalCollected}`, 10, SIM_H - 40);
-}
-
-function drawNest() {
-  noStroke();
-  fill(255,200,0);
-  ellipse(environment.nestPos.x, environment.nestPos.y, environment.nestRadius*2, environment.nestRadius*2);
-}
-
-/** Debug overlay (clusters, etc.) */
-function showDebugText() {
   fill(255);
   textSize(14);
-  text(`Exploration: speed=${clusters.exploration.speed.toFixed(2)}, randomTurnProb=${clusters.exploration.randomTurnProb.toFixed(3)}`, 310, 20);
-  text(`Stigmergy: lifetime=${clusters.stigmergy.pheromoneLifetime}, followW=${clusters.stigmergy.pheromoneFollowWeight.toFixed(2)}`, 310, 40);
-  text(`Resource: count=${clusters.resourceMgmt.resourceCount}, initQty=${clusters.resourceMgmt.initialQuantity}, consRate=${clusters.resourceMgmt.consumptionRate}`, 310, 60);
+  text(`Ressources : ${resources.length}  Collecté : ${totalCollected}`, 10, SIM_H - 20);
 }
 
 
-/** Gestion souris */
+function drawNest() {
+  noStroke();                // ← désactivation du contour
+  fill(255, 200, 0);
+  ellipse(environment.nestPos.x, environment.nestPos.y, environment.nestRadius * 2);
+}
+
+
+// Input
 function mousePressed() {
-  // Vérifie si on clique sur un pion
-  if (mouseX<CONTROL_PANEL_WIDTH) {
-    for (let i=pieces.length-1; i>=0; i--){
-      let p = pieces[i];
-      if (p.mouseOver(mouseX,mouseY)) {
-        // on drag
-        p.isDragging = true;
-        p.offX = mouseX - p.x;
-        p.offY = mouseY - p.y;
-        // ramène p en premier plan
-        pieces.push( pieces.splice(i,1)[0] );
-        return;
-      }
+  for (let p of pieces) {
+    if (p.mouseOver(mouseX, mouseY)) {
+      p.isDragging = true;
+      p.offX = mouseX - p.x;
+      p.offY = mouseY - p.y;
     }
   }
 }
 
 function mouseDragged() {
-  // si un pion est en drag
-  for (let p of pieces){
+  for (let p of pieces) {
     if (p.isDragging) {
       p.x = mouseX - p.offX;
       p.y = mouseY - p.offY;
     }
   }
 }
-
 function mouseReleased() {
-  // fin du drag
-  for (let p of pieces){
-    if (p.isDragging){
+  for (let p of pieces) {
+    if (p.isDragging) {
       p.isDragging = false;
-      // On regarde si on est sur une cell
       let c = getCellUnderPiece(p);
       if (c) {
-        // on centre la pièce
+        // on recentre visuellement le pion
         p.x = c.x + (c.w - p.w)/2;
         p.y = c.y + (c.h - p.h)/2;
-        p.currentCell = c;
-        // applique ou reset
-        if (c.key==='CENTER'){
-          resetCluster(p.clusterName);
-        } else {
-          applyTrigramEffect(c.key, p.clusterName);
-        }
-      } else {
-        p.currentCell = null;
+        // on gère le compteur de clics / reset via applyClick
+        p.applyClick(c);
       }
     }
   }
+  // on recalcule tous les clusters après chaque modification de pion
+  updateClusters();
 }
